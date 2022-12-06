@@ -39,6 +39,7 @@
 
 #include <condition_variable>
 #include <mutex>
+#include <queue>
 #include <vector>
 #include <set>
 #include <thread>
@@ -265,6 +266,8 @@ class GDALGeoPackageDataset final : public OGRSQLiteBaseDataSource, public GDALG
         void                ClearCachedRelationships();
         void                LoadRelationships() const;
         void                LoadRelationshipsUsingRelatedTablesExtension() const;
+        static std::string  GenerateNameForRelationship(const char* pszBaseTableName,  const char* pszRelatedTableName,  const char* pszType );
+        bool                ValidateRelationship(const GDALRelationship * poRelationship, std::string& failureReason );
 
         bool                m_bIsGeometryTypeAggregateInterrupted = false;
         std::string         m_osGeometryTypeAggregateResult{};
@@ -323,6 +326,15 @@ class GDALGeoPackageDataset final : public OGRSQLiteBaseDataSource, public GDALG
 
         const GDALRelationship* GetRelationship(const std::string& name) const override;
 
+        bool        AddRelationship(std::unique_ptr<GDALRelationship>&& relationship,
+                                    std::string& failureReason) override;
+
+        bool        DeleteRelationship(const std::string& name,
+                                       std::string& failureReason) override;
+
+        bool        UpdateRelationship(std::unique_ptr<GDALRelationship>&& relationship,
+                                       std::string& failureReason) override;
+
         virtual std::pair<OGRLayer*, IOGRSQLiteGetSpatialWhere*> GetLayerWithGetSpatialWhereByName( const char* pszName ) override;
 
         virtual OGRLayer *  ExecuteSQL( const char *pszSQLCommand,
@@ -347,6 +359,7 @@ class GDALGeoPackageDataset final : public OGRSQLiteBaseDataSource, public GDALG
         bool                    HasDataColumnConstraintsTableGPKG_1_0() const;
         bool                CreateColumnsTableAndColumnConstraintsTablesIfNecessary();
         bool                HasGpkgextRelationsTable() const;
+        bool                CreateRelationsTableIfNecessary();
         bool                HasQGISLayerStyles() const;
 
         const char*         GetGeometryTypeString(OGRwkbGeometryType eType);
@@ -624,10 +637,27 @@ class OGRGeoPackageTableLayer final : public OGRGeoPackageLayer
 
     CPL_DISALLOW_COPY_ASSIGN(OGRGeoPackageTableLayer)
 
+    // Used when m_nIsCompatOfOptimizedGetNextArrowArray == TRUE
+    struct ArrowArrayPrefetchTask
+    {
+        std::thread                              m_oThread{};
+        std::condition_variable                  m_oCV{};
+        std::mutex                               m_oMutex{};
+        bool                                     m_bArrayReady = false;
+        bool                                     m_bFetchRows = false;
+        bool                                     m_bStop = false;
+        std::unique_ptr<GDALGeoPackageDataset>   m_poDS{};
+        OGRGeoPackageTableLayer                 *m_poLayer{};
+        GIntBig                                  m_iStartShapeId = 0;
+        std::unique_ptr<struct ArrowArray>       m_psArrowArray = nullptr;
+    };
+    std::queue<std::unique_ptr<ArrowArrayPrefetchTask>> m_oQueueArrowArrayPrefetchTasks{};
+
+    // Used when m_nIsCompatOfOptimizedGetNextArrowArray == FALSE
     std::thread         m_oThreadNextArrowArray{};
     std::unique_ptr<OGRGPKGTableLayerFillArrowArray> m_poFillArrowArray{};
     std::unique_ptr<GDALGeoPackageDataset> m_poOtherDS{};
-    struct ArrowArray*  m_psNextArrayArray = nullptr;
+
     virtual int GetNextArrowArray(struct ArrowArrayStream*,
                                    struct ArrowArray* out_array) override;
     int                 GetNextArrowArrayInternal(struct ArrowArray* out_array);
