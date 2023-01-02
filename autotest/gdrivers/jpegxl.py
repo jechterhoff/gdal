@@ -30,6 +30,7 @@
 ###############################################################################
 
 import base64
+import struct
 
 import gdaltest
 import pytest
@@ -314,6 +315,10 @@ def test_jpegxl_icc_profile():
 
 def test_jpegxl_lossless_copy_of_jpeg():
 
+    jpeg_drv = gdal.GetDriverByName("JPEG")
+    if jpeg_drv is None:
+        pytest.skip("JPEG driver missing")
+
     has_box_api = "COMPRESS_BOX" in gdal.GetDriverByName("JPEGXL").GetMetadataItem(
         "DMD_CREATIONOPTIONLIST"
     )
@@ -329,7 +334,11 @@ def test_jpegxl_lossless_copy_of_jpeg():
         assert set(ds.GetMetadataDomainList()) == set(
             ["DERIVED_SUBDATASETS", "EXIF", "IMAGE_STRUCTURE"]
         )
-        assert ds.GetMetadataItem("HAS_JPEG_RECONSTRUCTION_DATA", "_DEBUG_") == "YES"
+        assert (
+            ds.GetMetadataItem("COMPRESSION_REVERSIBILITY", "IMAGE_STRUCTURE")
+            == "LOSSY"
+        )
+        assert ds.GetMetadataItem("ORIGINAL_COMPRESSION", "IMAGE_STRUCTURE") == "JPEG"
 
     ds = None
     gdal.GetDriverByName("JPEGXL").Delete(outfilename)
@@ -343,6 +352,88 @@ def test_jpegxl_lossless_copy_of_jpeg():
             assert (
                 gdal.GetDriverByName("JPEGXL").CreateCopy(outfilename, src_ds) is None
             )
+
+
+def test_jpegxl_lossless_copy_of_jpeg_with_mask_band():
+
+    jpeg_drv = gdal.GetDriverByName("JPEG")
+    if jpeg_drv is None:
+        pytest.skip("JPEG driver missing")
+
+    drv = gdal.GetDriverByName("JPEGXL")
+    if drv.GetMetadataItem("JXL_ENCODER_SUPPORT_EXTRA_CHANNELS") is None:
+        pytest.skip()
+
+    has_box_api = "COMPRESS_BOX" in drv.GetMetadataItem("DMD_CREATIONOPTIONLIST")
+    src_ds = gdal.Open("data/jpeg/masked.jpg")
+    outfilename = "/vsimem/out.jxl"
+    drv.CreateCopy(outfilename, src_ds)
+    if has_box_api:
+        assert gdal.VSIStatL(outfilename + ".aux.xml") is None
+
+    ds = gdal.Open(outfilename)
+    assert ds is not None
+    assert ds.RasterCount == 4
+    assert (
+        ds.GetRasterBand(4).Checksum()
+        == src_ds.GetRasterBand(1).GetMaskBand().Checksum()
+    )
+
+    if has_box_api:
+        assert (
+            ds.GetMetadataItem("COMPRESSION_REVERSIBILITY", "IMAGE_STRUCTURE")
+            == "LOSSY"
+        )
+        assert ds.GetMetadataItem("ORIGINAL_COMPRESSION", "IMAGE_STRUCTURE") == "JPEG"
+
+    outfilename_jpg = "/vsimem/out.jpg"
+
+    jpeg_drv.CreateCopy(outfilename_jpg, ds)
+    ds = None
+    ds = gdal.Open(outfilename_jpg)
+    assert ds is not None
+    assert ds.GetRasterBand(1).Checksum() == src_ds.GetRasterBand(1).Checksum()
+    assert ds.GetRasterBand(2).Checksum() == src_ds.GetRasterBand(2).Checksum()
+    assert ds.GetRasterBand(3).Checksum() == src_ds.GetRasterBand(3).Checksum()
+    assert (
+        ds.GetRasterBand(1).GetMaskBand().Checksum()
+        == src_ds.GetRasterBand(1).GetMaskBand().Checksum()
+    )
+    ds = None
+
+    drv.Delete(outfilename)
+    jpeg_drv.Delete(outfilename_jpg)
+
+
+def test_jpegxl_lossless_copy_of_jpeg_xmp():
+
+    jpeg_drv = gdal.GetDriverByName("JPEG")
+    if jpeg_drv is None:
+        pytest.skip("JPEG driver missing")
+    drv = gdal.GetDriverByName("JPEGXL")
+    has_box_api = "COMPRESS_BOX" in drv.GetMetadataItem("DMD_CREATIONOPTIONLIST")
+    if not has_box_api:
+        pytest.skip()
+
+    src_ds = gdal.Open("data/jpeg/byte_with_xmp.jpg")
+    outfilename = "/vsimem/out.jxl"
+    drv.CreateCopy(outfilename, src_ds)
+    assert gdal.VSIStatL(outfilename + ".aux.xml") is None
+
+    ds = gdal.Open(outfilename)
+    assert ds is not None
+
+    outfilename_jpg = "/vsimem/out.jpg"
+    jpeg_drv.CreateCopy(outfilename_jpg, ds)
+    assert gdal.VSIStatL(outfilename_jpg + ".aux.xml") is None
+    ds = None
+    ds = gdal.Open(outfilename_jpg)
+    assert ds is not None
+    assert ds.GetMetadata("xml:XMP") == src_ds.GetMetadata("xml:XMP")
+    ds = None
+
+    drv.Delete(outfilename)
+    jpeg_drv.Delete(outfilename_jpg)
 
 
 def test_jpegxl_read_extra_channels():
@@ -637,3 +728,30 @@ def test_jpegxl_band_combinations():
             vrtds = None
             ds = None
             gdal.Unlink(tmpfilename)
+
+
+###############################################################################
+# Test APPLY_ORIENTATION=YES open option
+
+
+@pytest.mark.parametrize("orientation", [i + 1 for i in range(8)])
+def test_jpegxl_apply_orientation(orientation):
+
+    open_options = gdal.GetDriverByName("JPEGXL").GetMetadataItem("DMD_OPENOPTIONLIST")
+    if open_options is None or "APPLY_ORIENTATION" not in open_options:
+        pytest.skip()
+
+    ds = gdal.OpenEx(
+        "data/jpegxl/exif_orientation/F%d.jxl" % orientation,
+        open_options=["APPLY_ORIENTATION=YES"],
+    )
+    assert ds.RasterXSize == 3
+    assert ds.RasterYSize == 5
+    vals = struct.unpack("B" * 3 * 5, ds.ReadRaster())
+    vals = [1 if v else 0 for v in vals]
+    assert vals == [1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0]
+    if orientation != 1:
+        assert ds.GetMetadataItem("EXIF_Orientation", "EXIF") is None
+        assert ds.GetMetadataItem("original_EXIF_Orientation", "EXIF") == str(
+            orientation
+        )

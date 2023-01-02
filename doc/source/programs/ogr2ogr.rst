@@ -69,7 +69,8 @@ output coordinate system or even reprojecting the features during translation.
 
 .. option:: -append
 
-    Append to existing layer instead of creating new
+    Append to existing layer instead of creating new. This option also enables
+    :option:`-update`.
 
 .. option:: -upsert
 
@@ -539,44 +540,32 @@ Basic conversion from Shapefile to GeoPackage:
 
 .. code-block::
 
-  ogr2ogr \
-    -f GPKG output.gpkg \
-    input.shp
+  ogr2ogr output.gpkg input.shp
 
 Change the coordinate reference system from ``EPSG:4326`` to ``EPSG:3857``:
 
 .. code-block::
 
-  ogr2ogr \
-    -s_srs EPSG:4326 \
-    -t_srs EPSG:3857 \
-    -f GPKG output.gpkg \
-    input.gpkg
+  ogr2ogr -s_srs EPSG:4326 -t_srs EPSG:3857 output.gpkg input.gpkg
 
-Example appending to an existing layer (both ``-update`` and ``-append`` flags need to be used):
+Example appending to an existing layer:
 
 .. code-block::
 
-    ogr2ogr -update -append -f PostgreSQL PG:dbname=warmerda abc.tab
+    ogr2ogr -append -f PostgreSQL PG:dbname=warmerda abc.tab
 
 Clip input layer with a bounding box (<xmin> <ymin> <xmax> <ymax>):
 
 .. code-block::
 
-  ogr2ogr \
-    -spat -13.931 34.886 46.23 74.12 \
-    -f GPKG output.gpkg \
-    natural_earth_vector.gpkg
+  ogr2ogr -spat -13.931 34.886 46.23 74.12 output.gpkg natural_earth_vector.gpkg
 
 Filter Features by a ``-where`` clause:
 
 .. code-block::
 
-  ogr2ogr \
-    -where "\"POP_EST\" < 1000000" \
-    -f GPKG output.gpkg \
-    natural_earth_vector.gpkg \
-    ne_10m_admin_0_countries
+  ogr2ogr -where "\"POP_EST\" < 1000000" \
+    output.gpkg natural_earth_vector.gpkg ne_10m_admin_0_countries
 
 
 Example reprojecting from ETRS_1989_LAEA_52N_10E to EPSG:4326 and clipping to a bounding box:

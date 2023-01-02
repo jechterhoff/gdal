@@ -49,6 +49,7 @@ pytestmark = pytest.mark.require_driver("JPEG")
 def test_jpeg_1():
 
     ds = gdal.Open("data/jpeg/albania.jpg")
+    assert ds.GetMetadataItem("JPEG_QUALITY", "IMAGE_STRUCTURE") == "80"
     cs = ds.GetRasterBand(2).Checksum()
     if cs == 34296:
         gdaltest.jpeg_version = "9b"
@@ -1385,6 +1386,76 @@ def test_jpeg_write_4band_not_cmyk():
         gdal.GetDriverByName("JPEG").CreateCopy("/vsimem/out.jpg", src_ds)
     assert gdal.GetLastErrorMsg() != ""
     gdal.GetDriverByName("JPEG").Delete("/vsimem/out.jpg")
+
+
+###############################################################################
+# Test APPLY_ORIENTATION=YES open option
+
+
+@pytest.mark.parametrize("orientation", [i + 1 for i in range(8)])
+def test_jpeg_apply_orientation(orientation):
+
+    ds = gdal.OpenEx(
+        "data/jpeg/exif_orientation/F%d.jpg" % orientation,
+        open_options=["APPLY_ORIENTATION=YES"],
+    )
+    assert ds.RasterXSize == 3
+    assert ds.RasterYSize == 5
+    vals = struct.unpack("B" * 3 * 5, ds.ReadRaster())
+    vals = [1 if v else 0 for v in vals]
+    assert vals == [1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0]
+    assert ds.GetRasterBand(1).GetColorInterpretation() == gdal.GCI_GrayIndex
+    if orientation != 1:
+        assert ds.GetMetadataItem("EXIF_Orientation") is None
+        assert ds.GetMetadataItem("original_EXIF_Orientation") == str(orientation)
+
+
+###############################################################################
+# Test lossless conversion from JPEGXL
+
+
+def test_jpeg_from_jpegxl():
+
+    jpegxl_drv = gdal.GetDriverByName("JPEGXL")
+    if jpegxl_drv is None:
+        pytest.skip("JPEGXL driver missing")
+    if "COMPRESS_BOXES" not in jpegxl_drv.GetMetadataItem("DMD_CREATIONOPTIONLIST"):
+        pytest.skip("not enough recent libjxl")
+
+    src_ds = gdal.Open("data/jpeg/albania.jpg")
+
+    # Lossless JPEG -> JPEGXL conversion
+    tmp_filename = "/vsimem/temp.jxl"
+    tmp_ds = jpegxl_drv.CreateCopy(tmp_filename, src_ds)
+
+    # Lossless JPEGXL -> JPEG  conversion
+    out_filename = "/vsimem/out.jpg"
+    out_ds = gdal.Translate(out_filename, tmp_ds, metadataOptions=["foo=bar"])
+    tmp_ds = None
+
+    # Check data is preserved
+    assert out_ds.GetRasterBand(1).Checksum() == src_ds.GetRasterBand(1).Checksum()
+    assert out_ds.GetRasterBand(2).Checksum() == src_ds.GetRasterBand(2).Checksum()
+    assert out_ds.GetRasterBand(3).Checksum() == src_ds.GetRasterBand(3).Checksum()
+    assert out_ds.GetMetadataItem("EXIF_ExifVersion") == "0210"
+    out_ds = None
+
+    # Check data is preserved after file reopening
+    out_ds = gdal.Open(out_filename)
+    assert out_ds.GetRasterBand(1).Checksum() == src_ds.GetRasterBand(1).Checksum()
+    assert out_ds.GetRasterBand(2).Checksum() == src_ds.GetRasterBand(2).Checksum()
+    assert out_ds.GetRasterBand(3).Checksum() == src_ds.GetRasterBand(3).Checksum()
+    assert out_ds.GetMetadataItem("EXIF_ExifVersion") == "0210"
+    assert out_ds.GetMetadataItem("foo") == "bar"
+    out_ds = None
+
+    gdal.Unlink(out_filename + ".aux.xml")
+    out_ds = gdal.Open(out_filename)
+    assert out_ds.GetMetadataItem("EXIF_ExifVersion") == "0210"
+    out_ds = None
+
+    jpegxl_drv.Delete(tmp_filename)
+    gdal.GetDriverByName("JPEG").Delete(out_filename)
 
 
 ###############################################################################

@@ -485,6 +485,37 @@ class ExceptionMgr(object):
         else:
             DontUseExceptions()
 
+
+
+import contextlib
+@contextlib.contextmanager
+def enable_exceptions():
+    """Temporarily enable exceptions.
+
+       Note: this will only affect the osgeo.ogr module. For gdal or osr
+       modules, use respectively osgeo.gdal.enable_exceptions() and
+       osgeo.osr.enable_exceptions().
+
+       Returns
+       -------
+            A context manager
+
+       Example
+       -------
+
+           with ogr.enable_exceptions():
+               ogr.VectorTranslate("out.gpkg", "in.shp")
+    """
+    if GetUseExceptions():
+        yield
+    else:
+        UseExceptions()
+        try:
+            yield
+        finally:
+            DontUseExceptions()
+
+
 from . import osr
 class MajorObject(object):
     r"""Proxy of C++ GDALMajorObjectShadow class."""
@@ -2203,6 +2234,14 @@ class Layer(MajorObject):
 
         """
         return _ogr.Layer_GetGeometryTypes(self, *args, **kwargs)
+
+    def GetSupportedSRSList(self, *args, **kwargs) -> "void":
+        r"""GetSupportedSRSList(Layer self, int geom_field=0)"""
+        return _ogr.Layer_GetSupportedSRSList(self, *args, **kwargs)
+
+    def SetActiveSRS(self, *args) -> "OGRErr":
+        r"""SetActiveSRS(Layer self, int geom_field, SpatialReference srs) -> OGRErr"""
+        return _ogr.Layer_SetActiveSRS(self, *args)
 
     def Reference(self):
       "For backwards compatibility only."

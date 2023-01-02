@@ -451,7 +451,7 @@ def test_osr_basic_12():
     wkt_2 = osr.GetUserInputAsWKT("WGS84")
     assert (
         wkt_1
-        == 'GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AXIS["Longitude",EAST],AXIS["Latitude",NORTH]]'
+        == 'GEOGCS["WGS 84 (CRS84)",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AXIS["Longitude",EAST],AXIS["Latitude",NORTH],AUTHORITY["OGC","CRS84"]]'
     )
     assert (
         wkt_2
@@ -2228,3 +2228,15 @@ def test_osr_basic_eqearth_central_meridian():
         "+proj=eqearth +lon_0=150 +x_0=0 +y_0=0 +R=6371008.7714 +units=m +type=crs"
     )
     assert srs.GetProjParm(osr.SRS_PP_CENTRAL_MERIDIAN, 0) == 150
+
+
+###############################################################################
+# Test osr.enable_exceptions()
+
+
+def test_osr_exceptions():
+
+    with pytest.raises(Exception):
+        with osr.enable_exceptions():
+            srs = osr.SpatialReference()
+            srs.ImportFromEPSG(0)
